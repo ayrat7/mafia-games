@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Мафия</title>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#14121c;color:#eee;font:15px system-ui,sans-serif;min-height:100vh}
+#ping{position:fixed;top:8px;right:10px;font-size:12px;color:#8f8;background:#0008;padding:3px 8px;border-radius:10px;z-index:9}
+.s{display:none;max-width:560px;margin:0 auto;padding:44px 14px 20px}.s.on{display:block}
+h1{text-align:center;font-size:34px;margin:30px 0}
+h3{margin:14px 0 6px}
+button,input,select{font:inherit;border-radius:10px;border:1px solid #444;background:#25222f;color:#eee;padding:10px 14px}
+button{cursor:pointer;background:#7a1f3d;border:0}button:hover{filter:brightness(1.2)}
+button.g{background:#2d2a3a}button.sel{outline:2px solid #fc6}button:disabled{opacity:.4}
+.col{display:flex;flex-direction:column;gap:10px}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.row>input{flex:1;min-width:0}
+.card{background:#1e1b29;padding:12px;border-radius:12px;margin:10px 0}
+#chat{height:230px;overflow:auto;background:#0e0c14;border-radius:10px;padding:8px;font-size:14px}
+.sys{color:#fc6}.maf{color:#f77}.pv{color:#7cf}.dead{opacity:.45;text-decoration:line-through}
+.t{color:#aaa;font-size:13px}label.chk{display:inline-flex;gap:6px;align-items:center;margin:4px 12px 4px 0}
+.chk input{width:auto}small{color:#999}
+</style></head><body>
+<div id="ping">ping: —</div>
+
+<div id="menu" class="s on"><h1>🎭 Мафия</h1><div class="col">
+<button onclick="go('enter')">Начать</button><button class="g" onclick="go('set')">Настройки</button></div></div>
+
+<div id="set" class="s"><h3>Настройки</h3>
+<small>Подключено автоматически.</small>
+<div class="col" style="margin-top:8px">
+<button class="g" onclick="go('menu')">Назад</button></div>
+<div class="card">Пинг: <b id="pingBig">—</b></div></div>
+
+<div id="enter" class="s"><h3>Твоё имя</h3>
+<div class="col"><input id="nick" maxlength="16" placeholder="Имя">
+<div class="card"><h3>Создать комнату</h3><div class="row">Игроков до: <select id="msz"></select></div>
+<button style="margin-top:8px" onclick="createRoom()">Создать</button></div>
+<div class="card"><h3>Войти по ID</h3><div class="row"><input id="jid" maxlength="6" placeholder="ID комнаты" style="text-transform:uppercase"><button onclick="joinRoom($('#jid').value)">Войти</button></div></div>
+<button class="g" onclick="go('menu')">Назад</button></div></div>
+
+<div id="room" class="s">
+<div class="row" style="justify-content:space-between"><b>Комната <span id="rid"></span></b><button class="g" onclick="leave()">Выйти</button></div>
+<div id="info" class="card"></div><div id="cfgbox"></div><div id="act"></div>
+<div id="plist" class="card"></div>
+<div id="chat"></div>
+<div class="row" style="margin-top:8px"><input id="msg" placeholder="Сообщение" onkeydown="if(event.key=='Enter')send()"><button onclick="send()">➤</button></div>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+const ROLES={civ:['Мирный','🧑'],maf:['Мафия','🔫'],don:['Дон','🎩'],sher:['Комиссар','🕵️'],doc:['Доктор','💉'],man:['Маньяк','🔪'],cour:['Путана','💋']};
+const OPT=['don','sher','doc','man','cour'];
+const DESC={maf:'Ночью выбери жертву',don:'Ночью выбери жертву (комиссар видит тебя мирным)',sher:'Ночью проверь игрока',doc:'Ночью вылечи игрока (можно себя)',man:'Ночью убей игрока (сам по себе)',cour:'Ночью заблокируй игрока',civ:'Днём ищи мафию'};
+let uid=localStorage.uid||(localStorage.uid=Math.random().toString(36).slice(2,10));
+const cfg={
+  apiKey:"AIzaSyDSj3etcFrcUbMIYAVF82Iq20O1eOw66Uo",
+  authDomain:"mafia-c192f.firebaseapp.com",
+  databaseURL:"https://mafia-c192f-default-rtdb.firebaseio.com",
+  projectId:"mafia-c192f"
+};
+let db,off=0,rid=null,R=null,chatArr=[],privArr=[],refs=[];
+const now=()=>Date.now()+off;
+function go(id){document.querySelectorAll('.s').forEach(e=>e.classList.remove('on'));$('#'+id).classList.add('on')}
+for(let i=3;i<=20;i++)$('#msz').add(new Option(i,i,i==10,i==10));
+$('#nick').value=localStorage.name||'';
+
+function connect(){
+  try{firebase.initializeApp(cfg);db=firebase.database();
+ db.ref('.info/serverTimeOffset').on('value',s=>off=s.val()||0);
+ const ping=()=>{const t=performance.now();db.ref('_ping/'+uid).set(t).then(()=>{const p=Math.round(performance.now()-t);$('#ping').textContent='ping: '+p+' ms';$('#pingBig').textContent=p+' ms'}).catch(()=>$('#ping').textContent='ping: ошибка')};
+ ping();setInterval(ping,4000)}catch(e){alert('Ошибка Firebase: '+e.message)}}
+connect();
+function need(){if(!db){alert('Нет подключения к Firebase');go('set');return false}
+ const n=$('#nick').value.trim();if(!n){alert('Введи имя');return false}localStorage.name=n;return n}
+
+const rr=p=>db.ref('rooms/'+rid+(p?'/'+p:''));
+async function createRoom(){
+ const n=need();if(!n)return;
+ const id=Math.random().toString(36).slice(2,7).toUpperCase();
+ const roles={};OPT.forEach(k=>roles[k]=k=='sher'||k=='doc');
+ await db.ref('rooms/'+id).set({host:uid,max:+$('#msz').value,status:'lobby',roles,t:now()});
+ joinRoom(id)}
+async function joinRoom(id){
+ const n=need();if(!n)return;id=id.trim().toUpperCase();
+ const s=await db.ref('rooms/'+id).once('value');const r=s.val();
+ if(!r)return alert('Комната не найдена');
+ const ps=r.players||{};
+ if(!ps[uid]){if(r.status!='lobby')return alert('Игра уже идёт');
+  if(Object.keys(ps).length>=r.max)return alert('Комната заполнена')}
+ rid=id;
+ const me=db.ref('rooms/'+id+'/players/'+uid);
+ await me.set({name:n,alive:true,t:ps[uid]?.t||now()});
+ me.onDisconnect().remove();
+ $('#rid').textContent=id;go('room');
+ refs.push(rr().on('value',s=>{R=s.val();if(!R){leave(true);alert('Комната закрыта');return}render()}));
+ const c=rr('chat').limitToLast(100);refs.push(c);
+ c.on('value',s=>{chatArr=Object.values(s.val()||{});drawChat()});
+ const pv=rr('priv/'+uid);pv.on('value',s=>{privArr=Object.values(s.val()||{});drawChat()});
+ setInterval(tick,1000)}
+function leave(silent){if(rid&&db){if(R&&R.status=='lobby'||!R)rr('players/'+uid).remove();else rr('players/'+uid).update({gone:true})}
+ if(db&&rid){rr().off();rr('chat').off();rr('priv/'+uid).off()}
+ rid=null;R=null;location.reload()}
+
+function say(m,ch='sys'){rr('chat').push({u:uid,n:R.players[uid]?.name||'?',m,ch,t:now()})}
+function send(){const m=$('#msg').value.trim();if(!m||!R)return;
+ const me=R.players[uid];if(R.status=='play'){if(!me.alive)return;
+  if(R.phase=='night'){if(!isMaf(uid))return;return $('#msg').value='',say(m,'maf')}}
+ $('#msg').value='';say(m,'all')}
+const isMaf=i=>R.rl&&(R.rl[i]=='maf'||R.rl[i]=='don');
+function drawChat(){const el=$('#chat');if(!el)return;
+ const mine=R&&R.rl&&isMaf(uid);
+ const all=[...chatArr.filter(x=>x.ch!='maf'||mine),...privArr.map(x=>({...x,ch:'pv'}))].sort((a,b)=>a.t-b.t);
+ el.innerHTML=all.map(x=>x.ch=='sys'?`<div class=sys>⚙ ${esc(x.m)}</div>`:x.ch=='pv'?`<div class=pv>🔒 ${esc(x.m)}</div>`:
+  `<div class="${x.ch=='maf'?'maf':''}"><b>${esc(x.n)}${x.ch=='maf'?' 🔫':''}:</b> ${esc(x.m)}</div>`).join('');
+ el.scrollTop=1e9}
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function render(){
+ if(!R)return;const P=R.players||{},ids=Object.keys(P).filter(i=>!P[i].gone),isHost=R.host==uid;
+ // передача админки
+ if(!P[R.host]||P[R.host].gone){const n=ids.sort((a,b)=>P[a].t-P[b].t||a.localeCompare(b))[0];if(n==uid)rr('host').set(uid)}
+ if(R.status=='play'&&!R._reg){rr('players/'+uid).onDisconnect().update({gone:true});R._reg=1}
+ let info=`Игроков: ${ids.length}/${R.max}`;
+ if(R.status=='lobby')info+=isHost?' · Ты админ 👑':'';
+ else if(R.status=='play'){const me=R.rl?.[uid];info=`<b>${ROLES[me]?.[1]} Ты: ${ROLES[me]?.[0]}</b><br><small>${DESC[me]}</small><br>${R.phase=='night'?'🌙 Ночь':'☀️ День'} ${R.day} · <span id=tm></span>`+(P[uid].alive?'':'<br>💀 Ты выбыл')}
+ else info=`🏁 Победили: <b>${R.winner}</b>`;
+ if(R.status!='lobby'&&R.rl)info+=R.status=='end'?'<br><small>'+Object.keys(R.rl).map(i=>P[i]?.name+' — '+ROLES[R.rl[i]][0]).join(', ')+'</small>':'';
+ $('#info').innerHTML=info;
+ // настройки лобби
+ let cb='';
+ if(R.status=='lobby'||R.status=='end'){
+  cb=`<div class=card><h3>Роли</h3><small>Мирные и мафия есть всегда</small><br>`+OPT.map(k=>`<label class=chk><input type=checkbox ${R.roles[k]?'checked':''} ${isHost?'':'disabled'} onchange="rr('roles/${k}').set(this.checked)">${ROLES[k][1]} ${ROLES[k][0]}</label>`).join('')+
+  (isHost?`<div class=row style="margin-top:8px">Размер: <select onchange="rr('max').set(+this.value)">${Array.from({length:18},(_,i)=>`<option ${i+3==R.max?'selected':''}>${i+3}</option>`)}</select>
+  <button ${ids.length<3?'disabled':''} onclick="startGame()">Начать игру (${ids.length})</button></div>`:'<br><small>Ждём, пока админ начнёт</small>')+'</div>'}
+ $('#cfgbox').innerHTML=cb;
+ // действия
+ let a='';const me=P[uid];
+ if(R.status=='play'&&me.alive){const role=R.rl[uid];
+  const alive=ids.filter(i=>P[i].alive);
+  if(R.phase=='night'&&role!='civ'){const cur=R.acts?.[uid];
+   a=`<div class=card><h3>${{maf:'Выбери жертву',don:'Выбери жертву',sher:'Кого проверить?',doc:'Кого лечить?',man:'Кого убить?',cour:'Кого отвлечь?'}[role]}</h3><div class=row>`+
+   alive.filter(i=>i!=uid||role=='doc').map(i=>`<button class="g ${cur==i?'sel':''}" onclick="rr('acts/${uid}').set('${i}')">${esc(P[i].name)}</button>`).join('')+
+   `<button class="g ${cur=='skip'?'sel':''}" onclick="rr('acts/${uid}').set('skip')">Пропустить</button></div></div>`}
+  if(R.phase=='day'){const cur=R.votes?.[uid],cnt={};Object.values(R.votes||{}).forEach(v=>cnt[v]=(cnt[v]||0)+1);
+   a=`<div class=card><h3>Голосование</h3><div class=row>`+alive.filter(i=>i!=uid).map(i=>`<button class="g ${cur==i?'sel':''}" onclick="rr('votes/${uid}').set('${i}')">${esc(P[i].name)} ${cnt[i]||''}</button>`).join('')+
+   `<button class="g ${cur=='skip'?'sel':''}" onclick="rr('votes/${uid}').set('skip')">Никого ${cnt.skip||''}</button></div></div>`}}
+ $('#act').innerHTML=a;
+ $('#plist').innerHTML=ids.map(i=>`<span class="${P[i].alive===false?'dead':''}">${i==R.host?'👑':''}${esc(P[i].name)}</span>`).join(' · ');
+ drawChat();tm()}
+function tm(){const e=$('#tm');if(e&&R?.end)e.textContent=Math.max(0,Math.ceil((R.end-now())/1000))+' с'}
+
+// ---------- логика (выполняет админ) ----------
+const shuf=a=>{for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a};
+function assign(n,set){let m=Math.max(1,Math.floor(n/3)),a=[];
+ if(set.don){a.push('don');m--}for(let i=0;i<m;i++)a.push('maf');
+ ['sher','doc','man','cour'].forEach(k=>{if(set[k]&&a.length<n)a.push(k)});
+ while(a.length<n)a.push('civ');return shuf(a)}
+async function startGame(){
+ const ids=Object.keys(R.players).filter(i=>!R.players[i].gone);if(ids.length<3)return;
+ const a=assign(ids.length,R.roles),rl={},u={};
+ ids.forEach((id,i)=>{rl[id]=a[i];u['players/'+id+'/alive']=true});
+ Object.keys(R.players).filter(i=>!ids.includes(i)).forEach(i=>u['players/'+i]=null);
+ await rr().update({...u,rl,status:'play',phase:'night',day:1,end:now()+45000,acts:null,votes:null,chat:null,priv:null,winner:null});
+ R.rl=rl;say('Игра началась. Наступила ночь.')}
+const win=(al,rl)=>{const m=al.filter(i=>rl[i]=='maf'||rl[i]=='don').length,mn=al.filter(i=>rl[i]=='man').length;
+ if(!m&&!mn)return'Мирные жители';if(m&&m>=al.length-m)return'Мафия';if(mn&&!m&&al.length<=2)return'Маньяк';return null};
+let busy=false;
+async function tick(){tm();if(!R||R.status!='play'||R.host!=uid||busy)return;busy=true;try{
+ const P=R.players,rl=R.rl,alive=Object.keys(P).filter(i=>P[i].alive);
+ const act=alive.filter(i=>!P[i].gone);
+ if(R.phase=='night'){const need=act.filter(i=>rl[i]!='civ');
+  if(now()>=R.end||need.every(i=>R.acts?.[i]))await night(alive)}
+ else if(now()>=R.end||act.every(i=>R.votes?.[i]))await day(alive)}finally{busy=false}}
+async function night(alive){
+ const P=R.players,rl=R.rl,A=R.acts||{},u={};let blocked=null;
+ const f=r=>alive.find(i=>rl[i]==r);
+ const cr=f('cour');if(cr&&A[cr]&&A[cr]!='skip')blocked=A[cr];
+ const ok=i=>i&&i!=blocked&&A[i]&&A[i]!='skip'&&P[A[i]];
+ const cnt={};alive.filter(i=>(rl[i]=='maf'||rl[i]=='don')&&ok(i)).forEach(i=>cnt[A[i]]=(cnt[A[i]]||0)+1);
+ let mt=null,mx=0;for(const k in cnt)if(cnt[k]>mx){mx=cnt[k];mt=k}
+ const kills=new Set();if(mt)kills.add(mt);
+ const man=f('man');if(ok(man))kills.add(A[man]);
+ const dc=f('doc'),saved=ok(dc)?A[dc]:null,dead=[];
+ kills.forEach(k=>{if(k!=saved){dead.push(k);u['players/'+k+'/alive']=false}});
+ const sh=f('sher');
+ if(ok(sh)){const t=A[sh];const k=rr('priv/'+sh).push().key;u['priv/'+sh+'/'+k]={t:now(),m:P[t].name+(rl[t]=='maf'?' — МАФИЯ':' — не мафия')}}
+ if(blocked&&P[blocked]){const k=rr('priv/'+blocked).push().key;u['priv/'+blocked+'/'+k]={t:now(),m:'Тебя отвлекла путана, ночное действие не сработало'}}
+ const left=alive.filter(i=>!dead.includes(i)),w=win(left,rl);
+ await finish(u,w,dead.length?'Ночью погибли: '+dead.map(i=>P[i].name).join(', '):'Ночью никто не погиб','day',90000,left)}
+async function day(alive){
+ const P=R.players,rl=R.rl,cnt={},u={};
+ Object.entries(R.votes||{}).forEach(([k,v])=>{if(P[k]?.alive&&v!='skip')cnt[v]=(cnt[v]||0)+1});
+ const e=Object.entries(cnt).sort((a,b)=>b[1]-a[1]);let out=null;
+ if(e.length&&(e.length==1||e[0][1]>e[1][1]))out=e[0][0];
+ if(out)u['players/'+out+'/alive']=false;
+ const left=alive.filter(i=>i!=out),w=win(left,rl);
+ await finish(u,w,out?'Город изгнал: '+P[out].name+' ('+ROLES[rl[out]][0]+')':'Голоса разделились — никто не изгнан','night',45000,left,1)}
+async function finish(u,w,text,next,ms,left,inc){
+ u.acts=null;u.votes=null;
+ if(w){u.status='end';u.winner=w}else{u.phase=next;u.end=now()+ms;if(inc)u.day=R.day+1}
+ await rr().update(u);say(text);if(w)say('Игра окончена. Победили: '+w)}
+</script></body></html>
